@@ -14,11 +14,10 @@ import seaborn as sns
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, Callback
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense,LSTM,Dropout
 from tensorflow.keras.optimizers import Adam
-from sklearn.metrics import mean_absolute_error
 
 from google.colab import drive
 drive.mount('/content/drive')
@@ -36,6 +35,8 @@ df['Country'].unique()
 """## Jepang"""
 
 df_japan = df[df['Country']=='Japan']
+
+df_japan.head()
 
 df_japan.shape
 
@@ -73,11 +74,14 @@ ax=sns.lineplot(data=final_df ,x="Date",y="AvgTemperature")
 plt.title("Average Temperature in Japan",size=20,weight="bold")
 
 X = final_df['AvgTemperature'].values.reshape(-1, 1)
+training, data_test = train_test_split(X,test_size=0.2,shuffle=False)
+data_train, data_val = train_test_split(training,test_size=0.2,shuffle=False)
 
-train, data_test= train_test_split(X,test_size=0.2,shuffle=False)
-data_train,data_val=train_test_split(train,test_size=0.2,shuffle=False)
+print(f"Jumlah data training : {data_train.shape}")
+print(f"Jumlah data validation : {data_val.shape}")
+print(f"Jumlah data testing : {data_test.shape}")
 
-sc = MinMaxScaler(feature_range = (0, 1))
+sc = MinMaxScaler()
 train_scaled = sc.fit_transform(data_train)
 val_scaled = sc.fit_transform(data_val)
 test_scaled = sc.fit_transform(data_test)
@@ -94,13 +98,8 @@ def prepare_data(data, input_size):
     X = np.reshape(X, (X.shape[0], X.shape[1], 1))
     return X, y
 
-# Training Data
 X_train, y_train = prepare_data(train_scaled, input_size)
-
-# Validation Data
-X_val, y_val = prepare_data(val_scaled, input_size)
-
-# Test Data
+X_val, y_val = prepare_data(train_scaled, input_size)
 X_test, y_test = prepare_data(test_scaled, input_size)
 
 model=Sequential([
@@ -118,10 +117,28 @@ model=Sequential([
 ])
 model.summary()
 
+class MAEThresholdCallback(Callback):
+    def __init__(self, threshold):
+        super(MAEThresholdCallback, self).__init__()
+        self.threshold = threshold
+
+    def on_epoch_end(self, epoch, logs={}):
+      current_mae = logs.get('mae')
+      current_val_mae = logs.get('val_mae')
+      if (current_mae <= threshold_scaled_mae) and (current_val_mae <= threshold_scaled_mae):
+          print(f"\nEpoch {epoch + 1}: Training MAE ({current_mae:.4f}), Validation MAE ({current_val_mae:.4f}), exceeds threshold ({self.threshold:.4f}). Stopping training.")
+          self.model.stop_training = True
+
+X_scaled = sc.fit_transform(X)
+threshold_scaled_mae = (X_scaled.max() - X_scaled.min()) * 5 / 100
+mae_threshold_callback = MAEThresholdCallback(threshold_scaled_mae)
+print(f"Threshold scaled MAE : {threshold_scaled_mae:.4f}")
+
 callbacks = [
-    EarlyStopping(monitor='mae', patience=10, verbose=1, restore_best_weights=True),
+    EarlyStopping(monitor='mae', patience=5, verbose=1, restore_best_weights=True),
     ModelCheckpoint(filepath='best_model.h5', monitor='mae', save_best_only=True, verbose=1),
-    ReduceLROnPlateau(factor=0.5, patience=10, min_lr=0.000001, verbose=1)
+    ReduceLROnPlateau(factor=0.5, patience=10, min_lr=0.000001, verbose=1),
+    mae_threshold_callback
 ]
 
 model.compile(loss=tf.keras.losses.Huber(),optimizer=Adam(learning_rate=0.0001),metrics= ["mae"])
@@ -151,5 +168,20 @@ plt.plot(history.history['val_loss'], label='Validation Loss')
 plt.title('Model Loss')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+"""## Testing"""
+
+y_pred = model.predict(X_test)
+y_pred_actual = sc.inverse_transform(y_pred)
+y_test_actual = sc.inverse_transform(y_test.reshape(-1, 1))
+
+plt.figure(figsize=(12, 6))
+plt.plot(y_test_actual, label='Actual Temperature')
+plt.plot(y_pred_actual, label='Predicted Temperature')
+plt.title('Actual vs Predicted Temperature on Test Set')
+plt.xlabel('Time')
+plt.ylabel('Temperature')
 plt.legend()
 plt.show()
