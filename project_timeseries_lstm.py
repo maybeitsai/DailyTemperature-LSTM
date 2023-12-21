@@ -18,7 +18,7 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense,LSTM,Dropout
 from tensorflow.keras.optimizers import Adam
-from sklearn.metrics import  mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_absolute_error
 
 from google.colab import drive
 drive.mount('/content/drive')
